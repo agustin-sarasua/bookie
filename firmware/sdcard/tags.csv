@@ -1,0 +1,10 @@
+# Bookie tag map — one line per tag: UID,name
+#
+# The name is the file name (without extension) looked up inside every
+# /audio/<lang>/ folder. Tags that are not listed here fall back to their UID,
+# so /audio/en/04A224AA5C6180.mp3 works too.
+#
+# Get a UID by opening the serial monitor and typing: uid
+#
+# 04A224AA5C6180,bear
+# 04B1339B5C6181,fox

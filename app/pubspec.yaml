@@ -1,0 +1,34 @@
+name: bookie_studio
+description: "Configure Bookie's NFC tags and write the card."
+publish_to: 'none'
+version: 1.0.0+1
+
+# Resolved as part of the Melos workspace in ../pubspec.yaml: one lockfile,
+# at the repo root, shared by every package listed there.
+resolution: workspace
+
+environment:
+  sdk: ^3.10.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  nfc_manager: ^4.0.2
+  record: ^6.0.0
+  just_audio: ^0.10.0
+  file_picker: ^8.1.0
+  path_provider: ^2.1.5
+  path: ^1.9.0
+  archive: ^4.0.0
+  share_plus: ^11.0.0
+  permission_handler: ^12.0.0
+  collection: ^1.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

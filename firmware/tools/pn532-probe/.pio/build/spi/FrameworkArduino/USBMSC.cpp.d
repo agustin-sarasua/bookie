@@ -1,0 +1,4 @@
+.pio/build/spi/FrameworkArduino/USBMSC.cpp.o: \
+ /Users/asarasua/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.cpp \
+ /Users/asarasua/.platformio/packages/framework-arduinoespressif32/cores/esp32/USBMSC.h \
+ /Users/asarasua/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/dio_qspi/include/sdkconfig.h

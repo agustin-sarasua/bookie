@@ -1,0 +1,72 @@
+# Melos workspace root.
+#
+# The Dart side of this repo is one package, app/. Melos is here for its script
+# runner: `melos run app` is the one command that matters, and it works from
+# anywhere in the tree rather than only from app/.
+#
+# The firmware is not a Dart package and is not in this workspace — it stays
+# behind the Makefile (`make go`, `make card`, …).
+name: bookie
+description: Tap an NFC tag on a page of a children's book, hear that page read aloud.
+publish_to: none
+
+environment:
+  sdk: ^3.10.7
+
+# Dart pub workspaces: one lockfile, at this level, for every package listed.
+workspace:
+  - app
+
+dev_dependencies:
+  melos: ^8.8.0
+
+melos:
+  name: bookie
+
+  # Bootstrap writes IntelliJ run configurations into the repo root by default.
+  # Flip this back to true if you work in Android Studio and want them.
+  ide:
+    intellij: false
+
+  scripts:
+    app:
+      description: Run Bookie Studio on a connected phone.
+      run: cd app && flutter run
+      # `flutter run` needs a real terminal, or r/R/q do nothing. Without this
+      # Melos pipes the child's output to prefix it, and stdin is left unwired.
+      stdio: inherit
+
+    devices:
+      description: List the phones Flutter can see.
+      run: flutter devices
+      stdio: inherit
+
+    test:
+      description: The firmware-contract tests.
+      run: cd app && flutter test
+
+    analyze:
+      description: Analyze the app, with Flutter's rules rather than plain Dart's.
+      run: cd app && flutter analyze
+
+    format:
+      description: Format every Dart file in the workspace.
+      run: dart format app/lib app/test
+
+    build:android:
+      description: Build a debug APK.
+      run: cd app && flutter build apk --debug
+
+    build:ios:
+      description: Build for a device, unsigned.
+      run: cd app && flutter build ios --debug --no-codesign
+
+    build:
+      description: Build both platforms.
+      steps:
+        - build:android
+        - build:ios
+
+    clean:
+      description: Throw away build output and re-resolve.
+      run: cd app && flutter clean && cd .. && melos bootstrap

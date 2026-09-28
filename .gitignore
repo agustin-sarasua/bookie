@@ -1,0 +1,7 @@
+# Dart / Melos workspace
+.dart_tool/
+.packages
+*.iml
+.idea/
+
+# pubspec.lock is kept: app/ is an application, not a library.
