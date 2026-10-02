@@ -46,7 +46,13 @@ void setVolumeStep(uint8_t step) {
 
 void lamp(uint8_t &scene, float &level) {
   // isKey first: a missing float is logged as an error by Preferences.
-  scene = g_prefs.isKey("lampScene") ? g_prefs.getUChar("lampScene", 0) : 0;
+  // "lampScene" counted from "warm"; "lampScn2" counts from the "bright" scene
+  // added in front of it. An old value is read once and moved along by one.
+  if (g_prefs.isKey("lampScn2")) {
+    scene = g_prefs.getUChar("lampScn2", 0);
+  } else {
+    scene = g_prefs.isKey("lampScene") ? g_prefs.getUChar("lampScene", 0) + 1 : 0;
+  }
   level = g_prefs.isKey("lampLevel") ? g_prefs.getFloat("lampLevel", LAMP_DEFAULT_LEVEL)
                                      : LAMP_DEFAULT_LEVEL;
 }
@@ -55,8 +61,8 @@ void setLamp(uint8_t scene, float level) {
   uint8_t was;
   float wasLevel;
   lamp(was, wasLevel);
-  if (!g_prefs.isKey("lampScene") || was != scene) {
-    g_prefs.putUChar("lampScene", scene);
+  if (!g_prefs.isKey("lampScn2") || was != scene) {
+    g_prefs.putUChar("lampScn2", scene);
   }
   if (!g_prefs.isKey("lampLevel") || fabsf(wasLevel - level) > 0.005f) {
     g_prefs.putFloat("lampLevel", level);

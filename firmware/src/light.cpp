@@ -64,8 +64,9 @@ float behind(float head, float a) {
 
 // ---------------------------------------------------------------- lamp scenes
 
-constexpr uint8_t kScenes = 6;
-const char *const kSceneNames[kScenes] = {"warm", "candle", "sunset", "ocean", "rainbow", "night"};
+constexpr uint8_t kScenes = 7;
+const char *const kSceneNames[kScenes] = {"bright", "warm", "candle", "sunset",
+                                          "ocean",  "rainbow", "night"};
 
 // Cheap smooth noise, for the candle: a few incommensurate sines per LED.
 float flicker(int i, float t) {
@@ -77,21 +78,23 @@ float flicker(int i, float t) {
 Rgb scene(uint8_t which, int i, float t) {
   const float a = angleOf(i);
   switch (which) {
-    case 0:  // warm white, ~2700 K on a WS2812
+    case 0:  // bright: still warm (~3500 K), but every channel pulling its weight
+      return {1.0f, 0.86f, 0.62f};
+    case 1:  // warm white, ~2700 K on a WS2812: cosier, and mostly red, so dimmer
       return {1.0f, 0.62f, 0.28f};
-    case 1: {  // candle: amber that breathes and flickers, never quite still
+    case 2: {  // candle: amber that breathes and flickers, never quite still
       const float f = flicker(i, t);
       return Rgb{1.0f, 0.45f + 0.12f * f, 0.08f} * (0.55f + 0.45f * f);
     }
-    case 2: {  // sunset: orange to rose to violet, drifting round
+    case 3: {  // sunset: orange to rose to violet, drifting round
       const float p = wave01(a + t / 24000.0f);
       return mix(Rgb{1.0f, 0.38f, 0.05f}, Rgb{0.75f, 0.12f, 0.55f}, p);
     }
-    case 3: {  // ocean: teal and deep blue, a slow swell
+    case 4: {  // ocean: teal and deep blue, a slow swell
       const float p = wave01(a * 2.0f - t / 9000.0f) * wave01(a - t / 17000.0f);
       return mix(Rgb{0.0f, 0.18f, 0.85f}, Rgb{0.0f, 0.75f, 0.65f}, p);
     }
-    case 4:  // rainbow, pastel, turning slowly
+    case 5:  // rainbow, pastel, turning slowly
       return hsv((uint16_t)((a + t / 30000.0f) * 65536.0f), 0.6f, 1.0f);
     default:  // night light: a low ember red-amber
       return Rgb{1.0f, 0.22f, 0.02f} * 0.45f;
@@ -502,14 +505,25 @@ void render(uint32_t now, float dt) {
   // error carried into the next frame so a slow fade near black glides
   // instead of stepping.
   const float m = smooth(s.master);
+  float lin[LED_RING_COUNT][3];
+  float total = 0.0f;  // in full-channel units, ~20 mA each
   for (int i = 0; i < n; i++) {
     const float ch[3] = {px[i].r, px[i].g, px[i].b};
+    for (int k = 0; k < 3; k++) {
+      lin[i][k] = powf(clamp01(ch[k] * m), 2.2f);
+      total += lin[i][k];
+    }
+  }
+  // Over budget: scale the whole frame, so colours keep their balance.
+  const float budget = LED_CURRENT_BUDGET_MA / 20.0f;
+  const float scale = (total > budget ? budget / total : 1.0f) * LED_MAX_BRIGHTNESS;
+  for (int i = 0; i < n; i++) {
     uint8_t out[3];
     for (int k = 0; k < 3; k++) {
-      const float lin = powf(clamp01(ch[k] * m), 2.2f) * LED_MAX_BRIGHTNESS + s.residual[i][k];
-      const float q = floorf(lin + 0.5f);
+      const float v = lin[i][k] * scale + s.residual[i][k];
+      const float q = floorf(v + 0.5f);
       out[k] = (uint8_t)fminf(255.0f, q);
-      s.residual[i][k] = fmaxf(-0.5f, fminf(0.5f, lin - q));
+      s.residual[i][k] = fmaxf(-0.5f, fminf(0.5f, v - q));
     }
     g_strip.setPixelColor(physical(i), out[0], out[1], out[2]);
   }

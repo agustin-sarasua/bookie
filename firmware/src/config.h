@@ -219,14 +219,17 @@ constexpr uint32_t TOUCH_HOLD_MS     = 450;   // touch pad held this long: the d
 constexpr uint32_t TOUCH_DOUBLE_MS   = 350;   // second tap inside this: next lamp colour
 
 // ---------------------------------------------------------------- light
-// The ring runs off the cell, and sixteen WS2812Bs flat out are an amp. The
-// cap is applied after everything else, so no effect can exceed it.
+// The ring runs off the cell. A WS2812B draws ~20 mA per colour at full, so
+// the whole frame is scaled down when it would ask for more than the budget —
+// an amp shared with the speaker amplifier, which browns out before the cell
+// does. Applied after everything else, so no effect can exceed it.
 constexpr uint8_t  LED_RING_COUNT      = 12;
+constexpr uint16_t LED_CURRENT_BUDGET_MA = 1000;
 constexpr uint8_t  LED_RING_OFFSET     = 0;     // which LED is "top", for the arcs
 constexpr bool     LED_RING_CLOCKWISE  = true;
-constexpr uint8_t  LED_MAX_BRIGHTNESS  = 170;   // of 255
+constexpr uint8_t  LED_MAX_BRIGHTNESS  = 255;   // of 255; the budget above is the real limit
 constexpr uint32_t LIGHT_FRAME_MS      = 16;    // ~60 fps
-constexpr float    LAMP_DEFAULT_LEVEL  = 0.6f;
+constexpr float    LAMP_DEFAULT_LEVEL  = 0.85f;
 constexpr float    LAMP_MIN_LEVEL      = 0.04f; // the dimmer never goes fully dark
 constexpr uint32_t LAMP_DIM_SWEEP_MS   = 2500;  // dimmer, darkest to brightest
 constexpr uint32_t LAMP_FADE_MS        = 450;
