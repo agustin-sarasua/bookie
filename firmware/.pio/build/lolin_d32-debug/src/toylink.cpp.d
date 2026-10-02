@@ -200,4 +200,4 @@
  /Users/asarasua/.platformio/packages/framework-arduinoespressif32/cores/esp32/cbuf.h \
  /Users/asarasua/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_http_server/include/esp_http_server.h \
  /Users/asarasua/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/nghttp/port/include/http_parser.h \
- src/audio.h src/config.h src/library.h src/log.h src/sdfs.h
+ src/audio.h src/chimes.h src/config.h src/library.h src/log.h src/sdfs.h

@@ -132,6 +132,7 @@
  /Users/asarasua/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_hw_support/include/soc/esp32/spiram.h \
  /Users/asarasua/.platformio/packages/framework-arduinoespressif32/cores/esp32/io_pin_remap.h \
  /Users/asarasua/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h \
+ src/chimes.h \
  .pio/libdeps/lolin_d32-debug/ESP8266Audio/src/AudioFileSourceBuffer.h \
  .pio/libdeps/lolin_d32-debug/ESP8266Audio/src/AudioFileSource.h \
  .pio/libdeps/lolin_d32-debug/ESP8266Audio/src/AudioStatus.h \

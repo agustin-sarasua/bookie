@@ -133,5 +133,5 @@
  /Users/asarasua/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_hw_support/include/soc/esp32/spiram.h \
  /Users/asarasua/.platformio/packages/framework-arduinoespressif32/cores/esp32/io_pin_remap.h \
  /Users/asarasua/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h \
- src/app.h src/audio.h src/battery.h src/config.h src/library.h src/log.h \
- src/nfc.h src/sdfs.h src/toylink.h
+ src/app.h src/audio.h src/chimes.h src/battery.h src/config.h src/face.h \
+ src/library.h src/light.h src/log.h src/nfc.h src/sdfs.h src/toylink.h

@@ -141,6 +141,6 @@
  /Users/asarasua/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/rtc_cntl_struct.h \
  /Users/asarasua/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/soc/esp32/include/soc/sens_struct.h \
  /Users/asarasua/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/hal/include/hal/rtc_io_types.h \
- src/app.h src/audio.h src/battery.h src/buttons.h src/config.h \
- src/console.h src/library.h src/log.h src/nfc.h src/sdfs.h \
- src/settings.h src/toylink.h
+ src/app.h src/audio.h src/chimes.h src/battery.h src/buttons.h \
+ src/config.h src/console.h src/face.h src/library.h src/light.h \
+ src/log.h src/nfc.h src/sdfs.h src/settings.h src/toylink.h

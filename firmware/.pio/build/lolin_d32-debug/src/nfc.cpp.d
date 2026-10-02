@@ -139,4 +139,4 @@
  .pio/libdeps/lolin_d32-debug/Adafruit\ BusIO/Adafruit_SPIDevice.h \
  /Users/asarasua/.platformio/packages/framework-arduinoespressif32/libraries/SPI/src/SPI.h \
  /Users/asarasua/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.h \
- src/config.h src/log.h
+ src/config.h src/i2cbus.h src/log.h
