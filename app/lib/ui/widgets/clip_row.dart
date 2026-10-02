@@ -22,6 +22,7 @@ class ClipRow extends StatelessWidget {
     this.file,
     required this.onRecord,
     required this.onImport,
+    this.onGenerate,
     this.onRemove,
     this.highlight = false,
   });
@@ -33,6 +34,9 @@ class ClipRow extends StatelessWidget {
   final ClipPlayer player;
   final VoidCallback onRecord;
   final VoidCallback onImport;
+
+  /// The story assistant, when this slot can use it.
+  final VoidCallback? onGenerate;
   final VoidCallback? onRemove;
 
   /// Marks the slot as the one that matters — the fallback language for
@@ -73,7 +77,11 @@ class ClipRow extends StatelessWidget {
                     Text(
                       has
                           ? '${formatMillis(clip!.durationMs)} · ${formatBytes(clip!.bytes)}'
-                                '${clip!.source == ClipSource.recorded ? ' · recorded' : ''}'
+                                '${switch (clip!.source) {
+                                  ClipSource.recorded => ' · recorded',
+                                  ClipSource.generated => ' · AI story',
+                                  ClipSource.imported => '',
+                                }}'
                           : (note ?? 'Record or import a clip'),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
@@ -96,6 +104,12 @@ class ClipRow extends StatelessWidget {
                 ),
               MenuAnchor(
                 menuChildren: [
+                  if (onGenerate != null)
+                    MenuItemButton(
+                      leadingIcon: const Icon(Icons.auto_awesome, size: 20),
+                      onPressed: onGenerate,
+                      child: const Text('Create with AI'),
+                    ),
                   MenuItemButton(
                     leadingIcon: const Icon(Icons.mic_none, size: 20),
                     onPressed: onRecord,

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../model/project.dart';
 import '../model/uid.dart';
+import 'ai/ai_settings_sheet.dart';
+import 'ai/story_entry.dart';
 import 'scan_sheet.dart';
 import 'tag_detail_page.dart';
 import 'theme.dart';
@@ -44,6 +46,13 @@ class _TagsPageState extends State<TagsPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Tags'),
+        actions: [
+          IconButton(
+            tooltip: 'Story assistant settings',
+            onPressed: () => showAiSettings(context),
+            icon: const Icon(Icons.auto_awesome_outlined),
+          ),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(28),
           child: Padding(
@@ -73,21 +82,12 @@ class _TagsPageState extends State<TagsPage> {
               label: const Text('Scan a tag'),
             ),
       body: tags.isEmpty
-          ? EmptyState(
-              icon: Icons.style_outlined,
-              title: 'No tags yet',
-              message:
-                  'Stick an NFC tag on a page, hold your phone against it, and give it '
-                  'something to say.',
-              action: FilledButton.icon(
-                onPressed: () => _scan(context),
-                icon: const Icon(Icons.nfc),
-                label: const Text('Scan a tag'),
-              ),
-            )
+          ? const _Welcome()
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
               children: [
+                const _StoryBanner(),
+                const SizedBox(height: 12),
                 if (tags.length > 6)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
@@ -158,7 +158,11 @@ class _TagTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
         ),
         child: Icon(
-          ready == 0 ? Icons.volume_off_outlined : Icons.graphic_eq,
+          ready == 0
+              ? Icons.volume_off_outlined
+              : tag.clips.values.any((c) => c.source == ClipSource.generated)
+              ? Icons.auto_stories_rounded
+              : Icons.graphic_eq,
           size: 20,
           color: ready == 0
               ? theme.colorScheme.outline
@@ -238,4 +242,176 @@ class _CoverageNote extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Across the top of the list: the fastest way to fill a tag.
+class _StoryBanner extends StatelessWidget {
+  const _StoryBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: Ink(
+        decoration: BoxDecoration(
+          gradient: storyGradient(theme.colorScheme),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () => pickTagForStory(context),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+            child: Row(
+              children: [
+                const Icon(Icons.auto_awesome, color: Colors.white),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Create a story with AI',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        'Photograph a book — get it narrated, with a voice for every character.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: Colors.white.withValues(alpha: 0.9),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded, color: Colors.white),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// First run: what the app is for, in three steps, and the two ways to start.
+class _Welcome extends StatelessWidget {
+  const _Welcome();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    Widget step(int n, IconData icon, String title, String body) => Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: scheme.primary, size: 20),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('$n. $title', style: theme.textTheme.titleSmall),
+                const SizedBox(height: 2),
+                Text(
+                  body,
+                  style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+      children: [
+        Icon(Icons.menu_book_rounded, size: 52, color: scheme.primary),
+        const SizedBox(height: 12),
+        Text(
+          'Make any book talk',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Stick an NFC tag on a page, give it a story, and the toy plays it '
+          'whenever a little hand taps the book.',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 28),
+        step(1, Icons.nfc, 'Scan a tag', 'Hold the phone against the sticker.'),
+        step(
+          2,
+          Icons.auto_awesome,
+          'Give it a story',
+          'Let AI narrate it from photos of the book, record your own voice, or import a file.',
+        ),
+        step(
+          3,
+          Icons.send_rounded,
+          'Send it to the toy',
+          'Connect to the toy from the Card tab and update it — the card stays inside.',
+        ),
+        const SizedBox(height: 12),
+        GradientStartButton(onPressed: () => pickTagForStory(context)),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: () => showScanSheet(context),
+          icon: const Icon(Icons.nfc),
+          label: const Text('Scan a tag'),
+        ),
+      ],
+    );
+  }
+}
+
+class GradientStartButton extends StatelessWidget {
+  const GradientStartButton({super.key, required this.onPressed});
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      gradient: storyGradient(Theme.of(context).colorScheme),
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onPressed,
+        child: const SizedBox(
+          height: 52,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.auto_awesome, color: Colors.white),
+              SizedBox(width: 10),
+              Text(
+                'Create a story with AI',
+                style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }

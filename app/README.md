@@ -5,9 +5,10 @@ Give each NFC tag a story, then write the card. Flutter, Android and iOS.
 ```
 lib/model/     the card's contract: UIDs, tags.csv, file names
 lib/store/     the project as it lives on the phone
-lib/card/      the microSD card: diff, write, import, zip
+lib/card/      the microSD card, through the toy: diff, write, import
 lib/audio/     recording, playback, WAV
 lib/nfc/       reading a tag's UID
+lib/ai/        the story assistant: Gemini client, story model, engine
 lib/ui/        the screens
 ```
 
@@ -19,7 +20,7 @@ The repo is a Melos workspace, so these work from anywhere in the tree:
 dart pub global activate melos   # once
 melos bootstrap                  # resolve the workspace
 
-melos run app          # a real device: the simulator has no NFC and no card reader
+melos run app          # a real device: the simulator has no NFC and cannot join the toy
 melos run devices      # which phones Flutter can see
 melos run test         # the contract tests, which are the ones that matter
 melos run              # pick from the list
@@ -50,36 +51,64 @@ last syllable. An imported file is checked before it is accepted — a float WAV
 or a 24-bit one would reach the toy as noise, and it says so rather than letting
 you find out from the speaker.
 
+**AI stories.** *Create a story with AI* (Tags tab, or any tag's page) turns
+photos of a book into a narrated clip. Photograph the pages, optionally say how
+it should sound — follow the printed words, retell them, or invent a new
+adventure; a length; free-form instructions — and pick the languages. Then:
+
+1. **Gemini 3.8 Flash** (`generateContent`, JSON response schema) looks at the
+   pages, finds the characters, casts a prebuilt voice for the narrator and
+   for each character (all different), writes a one-line voice direction for
+   each ("a slow, rumbling, sleepy old bear"), and writes the script as
+   speaker-tagged lines in the first language.
+2. Every further language is a retelling of that script by the same cast, so
+   the bear keeps his voice in Spanish.
+3. **Gemini 3.8 Flash TTS** (`interactions`) reads it. The model speaks at most
+   two voices per request, so the script is cut into runs of consecutive lines
+   with one or two speakers, three requests at a time, and the WAV pieces are
+   stitched in order, resampled 24 → 22.05 kHz and saved as a 16-bit mono PCM
+   WAV on the tag — an ordinary clip, synced like any other.
+
+Voices can be auditioned and recast, and script lines edited; the app marks the
+audio out of date and re-records on request. Adding a language on the
+Languages tab offers to retell every AI story in it.
+
+There is no backend: the phone calls the Gemini API directly with a key the
+user pastes into *AI settings* (✨ on the Tags tab), kept in the app's support
+directory — never in the workspace, so it cannot reach the card. For
+development, `flutter run --dart-define=GEMINI_API_KEY=…` bakes one in. Model
+names are editable under *Advanced*. Stories live at
+`workspace/stories/<uid>/` (pages, `story.json`, voice samples) and never go
+onto the card. Generation needs the internet, so do it before joining the
+toy's WiFi.
+
 **Languages.** Add or remove folders under `/audio`. The list is what the
 language button cycles through, alphabetically, so the name you pick is the
 name the toy walks past. Each language also holds the four optional `/system`
 prompts (`ready`, `language`, `unknown`, `low-battery`), with `en` marked
 because every other language falls back to it.
 
-**The card.** Plug a reader into the phone, point the app at the card's root
-once, and write. It is a diff: only what changed is copied, and the app tells
-you what it is about to do first. Files are compared by size, the same shortcut
-`make card` takes with `rsync --modify-window=2` — FAT32 timestamps are too
-coarse to be worth trusting.
+**The card.** The card stays in the toy. Hold the language button and press
+volume up: the toy raises `Bookie-XXXX` and serves the card over HTTP, and
+**Connect** on the Card tab joins it. On Android the join is one system dialog;
+the binding afterwards is the part that matters, since the toy's network has no
+internet and every request would otherwise leave over cellular and never arrive.
 
-Android will happily let you point that picker at the phone's own storage, which
-writes perfectly and leaves the toy with an empty card, so the Card tab prints
-the volume it really landed on — `primary:/Download` is the phone, `1A2B-3C4D:/`
-is a card — and says so when the choice cannot work. After a write it reads
-`tags.csv` straight back, because a provider that quietly drops a file reports
-success just like one that did not.
+Once connected, the tab shows every tag and, per language, whether the toy
+already has that clip or will get it with the next update, and lists what will
+be removed. **Update the toy** makes the card match the app exactly:
 
-**Or don't take the card out.** Hold the language button and press volume up on
-the toy: it raises `Bookie-XXXX` and serves the card over HTTP, and
-**Connect to the toy instead** joins it. `lib/card/toy_card.dart` is the same
-six calls as a reader, over `dart:io`'s `HttpClient` rather than a platform
-channel, so `CardSync` cannot tell which one it is driving. On Android the join
-is one system dialog; the binding afterwards is the part that matters, since the
-toy's network has no internet and every request would otherwise leave over
-cellular and never arrive.
+* clips that are new or changed are written — compared by size, the same
+  shortcut `make card` takes; FAT32 timestamps are too coarse to trust;
+* `tags.csv` and `bookie.json` are written only when they differ from what the
+  card already holds, so a card that is up to date says so;
+* every clip under `/audio` that no tag uses is deleted — deleted or renamed
+  tags, the other container of a stem, removed languages — and an emptied
+  `/audio/<lang>` folder goes too, since every folder there is a language the
+  button cycles. `/system` prompts the app did not put there are left alone.
 
-Without either, **Export bookie-card.zip** builds the identical layout as an
-archive to unzip onto the card from a computer.
+After an update the card is read again; anything still pending is reported
+rather than assumed written.
 
 ## What lands on the card
 
@@ -132,17 +161,15 @@ directory diff rather than a translation step.
 **One container per stem.** `library.cpp::resolveStem()` prefers `.mp3` over
 `.wav`, so a leftover `bear.wav` beside a new `bear.mp3` is dead weight at best
 and the wrong clip at worst. Replacing a clip removes the other container
-locally, and the sync always clears the twin on the card — that one is not
-optional, unlike the orphans, which you are asked about.
+locally, and the update clears the twin on the card.
 
 ## Known edges
 
-* Writes are file-by-file and not transactional. Pull the reader out mid-write
-  and the card is left part-new; plug it back in and write again, which is why
-  deletes happen after writes rather than before.
-* Free space is read from the volume where the platform will report it. Some
-  Android providers will not, and then the app simply does not show it and
-  cannot warn you before a card fills up.
+* Writes are file-by-file and not transactional. If the toy drops its WiFi
+  mid-update the card is left part-new; connect again and update once more,
+  which is why deletes happen after writes rather than before.
+* Removing an emptied language folder needs the firmware from this change
+  (`/delete` now takes an empty directory); older firmware leaves the folder.
 * Importing a card replaces the workspace outright. It asks first, and
   refuses outright when the folder has no `tags.csv`, no `bookie.json` and
   no `/audio` — pointing at the wrong volume should not empty the app.

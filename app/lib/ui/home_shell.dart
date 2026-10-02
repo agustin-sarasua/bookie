@@ -13,7 +13,7 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
-  int _index = 0;
+  ValueNotifier<int>? _tab;
 
   @override
   void initState() {
@@ -22,34 +22,44 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _tab ??= AppScope.read(context).tab..addListener(_onTab);
+  }
+
+  void _onTab() => setState(() {});
+
+  @override
   void dispose() {
+    _tab?.removeListener(_onTab);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // A card reader is plugged and unplugged while the app is in the
-    // background as often as not, so re-check on the way back in.
+    // The toy drops its WiFi on any button press, or after five quiet
+    // minutes — check it is still there on the way back in.
     if (state == AppLifecycleState.resumed && mounted) {
-      AppScope.read(context).reconnect();
+      AppScope.read(context).refreshCard();
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final index = _tab?.value ?? 0;
     return Scaffold(
       body: IndexedStack(
-        index: _index,
+        index: index,
         children: [
           const TagsPage(),
           const LanguagesPage(),
-          CardPage(isVisible: _index == 2),
+          CardPage(isVisible: index == 2),
         ],
       ),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        selectedIndex: index,
+        onDestinationSelected: (i) => _tab?.value = i,
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.nfc_outlined),

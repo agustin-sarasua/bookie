@@ -2,13 +2,14 @@
 library;
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'ai/ai_settings.dart';
+import 'ai/story_service.dart';
 import 'card/card_target.dart';
 import 'card/toy_card.dart';
 import 'store/workspace.dart';
@@ -16,10 +17,17 @@ import 'store/workspace.dart';
 enum CardState { none, connecting, connected, missing }
 
 class AppState extends ChangeNotifier {
-  AppState._(this.workspace, this._linkFile);
+  AppState._(this.workspace, this.ai) : stories = StoryService(workspace, ai);
 
   final Workspace workspace;
-  final File _linkFile;
+
+  /// The Gemini key and models, and the AI stories made with them.
+  final AiSettings ai;
+  final StoryService stories;
+
+  /// The bottom tab the shell should show. Anything can ask — "Send to toy"
+  /// after a story is made is a jump to the Card tab from three screens deep.
+  final ValueNotifier<int> tab = ValueNotifier(0);
 
   CardTarget? _card;
   CardState _state = CardState.none;
@@ -32,63 +40,16 @@ class AppState extends ChangeNotifier {
 
   static Future<AppState> load() async {
     final workspace = await Workspace.open();
-    final docs = await getApplicationDocumentsDirectory();
-    final state = AppState._(
-      workspace,
-      File(p.join(docs.path, 'card-link.json')),
-    );
+    final state = AppState._(workspace, await AiSettings.load());
     workspace.addListener(state.notifyListeners);
-    unawaited(state.reconnect());
+
+    // Earlier builds remembered a card reader here and reopened it on launch,
+    // which could just as well be a folder on the phone. The card is reached
+    // through the toy now; drop the old grant so nothing resurrects it.
+    final docs = await getApplicationDocumentsDirectory();
+    final legacy = File(p.join(docs.path, 'card-link.json'));
+    if (await legacy.exists()) unawaited(legacy.delete());
     return state;
-  }
-
-  /// Try the card we used last time. Quiet on failure: not having a reader
-  /// plugged in is the normal state of the world, not an error to shout about.
-  Future<void> reconnect() async {
-    final handle = await _savedHandle();
-    if (handle == null) return;
-
-    _state = CardState.connecting;
-    notifyListeners();
-    try {
-      final info = await ReaderCard.restore(handle);
-      if (info == null) {
-        _card = null;
-        _state = CardState.missing;
-      } else {
-        _card = ReaderCard(info);
-        _state = CardState.connected;
-      }
-    } on CardUnavailable {
-      _card = null;
-      _state = CardState.missing;
-    }
-    notifyListeners();
-  }
-
-  /// Ask the user to point at the card. Returns false if they backed out.
-  Future<bool> connectCard() async {
-    _lastError = null;
-    _state = CardState.connecting;
-    notifyListeners();
-    try {
-      final info = await ReaderCard.pick();
-      if (info == null) {
-        _state = _card == null ? CardState.none : CardState.connected;
-        notifyListeners();
-        return false;
-      }
-      _card = ReaderCard(info);
-      _state = CardState.connected;
-      await _linkFile.writeAsString(jsonEncode(info.toJson()));
-      notifyListeners();
-      return true;
-    } on CardUnavailable catch (e) {
-      _lastError = e.message;
-      _state = CardState.none;
-      notifyListeners();
-      return false;
-    }
   }
 
   /// True when the card we are talking to is inside the toy rather than a
@@ -147,35 +108,25 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> forgetCard() async {
-    // Only a reader's grant is on disk. Disconnecting from the toy should not
-    // cost you the card reader you set up last week.
-    final wasReader = _card is ReaderCard;
+  /// Hand the toy its card back: it drops its WiFi and rescans.
+  Future<void> disconnect() async {
     await _card?.release();
     _card = null;
     _state = CardState.none;
-    if (wasReader && await _linkFile.exists()) await _linkFile.delete();
     notifyListeners();
   }
+
 
   void reportError(String message) {
     _lastError = message;
     notifyListeners();
   }
 
-  Future<String?> _savedHandle() async {
-    if (!await _linkFile.exists()) return null;
-    try {
-      final json = jsonDecode(await _linkFile.readAsString()) as Map;
-      return json['handle'] as String?;
-    } on Object {
-      return null;
-    }
-  }
-
   @override
   void dispose() {
     workspace.removeListener(notifyListeners);
+    stories.dispose();
+    tab.dispose();
     super.dispose();
   }
 }

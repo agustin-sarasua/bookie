@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../ai/voices.dart';
 import '../app_state.dart';
 import '../audio/clip_player.dart';
 import '../model/project.dart';
@@ -101,6 +102,20 @@ class LanguagesPage extends StatelessWidget {
               decoration: const InputDecoration(hintText: 'es'),
               onSubmitted: (value) => Navigator.pop(context, value),
             ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final code in const ['en', 'es', 'fr', 'de', 'it', 'pt', 'nl', 'ca'])
+                  if (!workspace.project.languages.contains(code))
+                    ActionChip(
+                      label: Text('${languageName(code)} · $code'),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => Navigator.pop(context, code),
+                    ),
+              ],
+            ),
           ],
         ),
         actions: [
@@ -127,6 +142,63 @@ class LanguagesPage extends StatelessWidget {
       return;
     }
     await workspace.addLanguage(clean);
+    if (context.mounted) await _offerStories(context, clean);
+  }
+
+  /// A new language on a toy that already has AI stories: the assistant can
+  /// retell every one of them in it, with the same cast and voices.
+  static Future<void> _offerStories(BuildContext context, String lang) async {
+    final state = AppScope.read(context);
+    final uids = await state.stories.storyTags();
+    if (uids.isEmpty || !context.mounted) return;
+
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.auto_awesome),
+        title: Text('Tell your AI stories in ${languageName(lang)}?'),
+        content: Text(
+          uids.length == 1
+              ? 'One tag has an AI story. The assistant can retell it in $lang with '
+                    'the same characters and voices.'
+              : '${uids.length} tags have AI stories. The assistant can retell each of '
+                    'them in $lang with the same characters and voices.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Not now')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Create them')),
+        ],
+      ),
+    );
+    if (go != true || !context.mounted) return;
+    if (!state.ai.hasKey) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add a Gemini API key first — the ✨ button on the Tags tab.')),
+      );
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      SnackBar(content: Text('Creating ${uids.length == 1 ? 'the story' : '${uids.length} stories'} in $lang…')),
+    );
+    var ok = 0;
+    for (final uid in uids) {
+      final job = state.stories.job(uid);
+      await job.load();
+      if (!job.story.isWritten) continue;
+      await job.produce(lang);
+      if (job.error == null) ok++;
+    }
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          ok == uids.length
+              ? 'Done — every AI story now speaks ${languageName(lang)}.'
+              : '$ok of ${uids.length} done. Open a tag to see what went wrong.',
+        ),
+      ),
+    );
   }
 }
 

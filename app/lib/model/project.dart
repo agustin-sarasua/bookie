@@ -30,7 +30,8 @@ const fallbackLanguage = 'en';
 /// `config.h::AUDIO_PATH_MAX`, minus the NUL the firmware leaves room for.
 const _audioPathMax = 96;
 
-enum ClipSource { recorded, imported }
+/// `generated` is the story assistant: narrated by Gemini from photos of the book.
+enum ClipSource { recorded, imported, generated }
 
 /// One audio file. [fileName] carries the extension because the firmware
 /// prefers `.mp3` over `.wav` when both exist, so the extension is part of

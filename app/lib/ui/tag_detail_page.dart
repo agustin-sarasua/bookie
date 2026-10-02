@@ -6,6 +6,8 @@ import '../audio/clip_player.dart';
 import '../model/project.dart';
 import '../model/uid.dart';
 import '../store/workspace.dart';
+import 'ai/story_entry.dart';
+import 'ai/story_studio_page.dart';
 import 'clip_actions.dart';
 import 'theme.dart';
 import 'widgets/clip_row.dart';
@@ -109,6 +111,8 @@ class _TagDetailPageState extends State<TagDetailPage> {
             ),
           ),
 
+          StoryEntryCard(uid: tag.uid),
+
           Section(
             title: 'What it plays',
             subtitle:
@@ -137,6 +141,7 @@ class _TagDetailPageState extends State<TagDetailPage> {
                     languages[i],
                     () => importClip(context),
                   ),
+                  onGenerate: () => openStoryStudio(context, tag.uid),
                   onRemove: () => _remove(workspace, tag, languages[i]),
                 ),
               ],
@@ -308,6 +313,8 @@ class _TagDetailPageState extends State<TagDetailPage> {
     if (confirmed != true) return;
 
     await _player.stop();
+    if (!mounted) return;
+    await AppScope.read(context).stories.discard(tag.uid);
     await workspace.removeTag(tag);
     if (mounted) Navigator.of(context).pop();
   }

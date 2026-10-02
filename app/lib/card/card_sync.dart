@@ -21,6 +21,7 @@ class SyncWrite {
     required this.bytes,
     this.source,
     this.inline,
+    this.replaces = false,
   });
 
   final String cardPath;
@@ -32,36 +33,55 @@ class SyncWrite {
   /// Content generated on the spot, for `tags.csv` and `bookie.json`.
   final Uint8List? inline;
 
+  /// True when the card already has a different file at [cardPath].
+  final bool replaces;
+
+  bool get isClip => source != null;
   String get name => cardPath.split('/').last;
 }
 
 class SyncPlan {
   const SyncPlan({
     required this.writes,
-    required this.shadowing,
-    required this.orphans,
+    required this.deletions,
+    required this.folders,
+    required this.onCard,
     required this.missingLocally,
   });
 
-  /// Files to add or replace.
+  /// Files to add or replace. `tags.csv` and `bookie.json` are only here when
+  /// what is on the card differs from what the project would write.
   final List<SyncWrite> writes;
 
-  /// Files that *must* go: a `bear.wav` left behind next to a new `bear.mp3`
-  /// would win the lookup in `library.cpp::resolveStem()` — no, worse: the mp3
-  /// would win and the wav would just waste space. Either way the card should
-  /// hold one container per stem, so these are always removed.
-  final List<String> shadowing;
+  /// Clips on the card that no tag plays: tags that were deleted or renamed,
+  /// languages that were removed, and the other container of a stem we are
+  /// writing (`bear.wav` beside a new `bear.mp3`). All of them go — the card
+  /// holds exactly what the project says and nothing else.
+  final List<String> deletions;
 
-  /// Everything else on the card that the project does not know about —
-  /// clips for deleted tags, folders for removed languages. Removing these is
-  /// the user's call.
-  final List<String> orphans;
+  /// `/audio/<lang>` folders for languages the project no longer has, removed
+  /// once they are empty: every folder under `/audio` is a language the button
+  /// cycles through, so an empty one would still be announced.
+  final List<String> folders;
+
+  /// What the card holds under `/audio` and `/system`, path -> size, as read
+  /// when the plan was made.
+  final Map<String, int> onCard;
 
   /// Clips the project lists but whose file has gone missing on the phone.
   final List<String> missingLocally;
 
+  List<SyncWrite> get clipWrites => writes.where((w) => w.isClip).toList();
+  bool get tagListChanged => writes.any((w) => !w.isClip);
+  int get added => writes.where((w) => w.isClip && !w.replaces).length;
+  int get updated => writes.where((w) => w.isClip && w.replaces).length;
+
   int get totalBytes => writes.fold(0, (sum, w) => sum + w.bytes);
-  bool get isEmpty => writes.isEmpty && shadowing.isEmpty;
+  bool get isEmpty => writes.isEmpty && deletions.isEmpty && folders.isEmpty;
+
+  /// Whether [cardPath] is on the card and needs nothing.
+  bool isSynced(String cardPath) =>
+      onCard.containsKey(cardPath) && !writes.any((w) => w.cardPath == cardPath);
 }
 
 class SyncProgress {
@@ -90,15 +110,17 @@ class CardSync {
     final desired = workspace.desiredFiles();
 
     final writes = <SyncWrite>[];
-    final shadowing = <String>[];
-    final orphans = <String>[];
+    final deletions = <String>[];
+    final folders = <String>[];
     final missing = <String>[];
 
     // What the card holds right now, under the two folders we own.
     final onCard = <String, int>{};
+    final audioLanguages = <String>[];
     for (final dir in const ['/audio', '/system']) {
       for (final langDir in await card.list(dir)) {
         if (!langDir.isDirectory) continue;
+        if (dir == '/audio') audioLanguages.add(langDir.name);
         for (final file in await card.list('$dir/${langDir.name}')) {
           if (file.isDirectory) continue;
           onCard['$dir/${langDir.name}/${file.name}'] = file.size;
@@ -115,51 +137,76 @@ class CardSync {
       final length = await file.length();
       final existing = onCard[entry.key];
       if (existing != length) {
-        writes.add(SyncWrite(cardPath: entry.key, bytes: length, source: file));
+        writes.add(
+          SyncWrite(
+            cardPath: entry.key,
+            bytes: length,
+            source: file,
+            replaces: existing != null,
+          ),
+        );
       }
     }
 
-    // Anything on the card we did not ask for.
+    // Anything on the card we did not ask for. Under /audio that is always
+    // removed. Under /system only the twin of a prompt we are writing is: a
+    // card set up with `make card` carries prompts the app never imported, and
+    // they are the toy's voice, not a tag's clip.
     for (final path in onCard.keys) {
       if (desired.containsKey(path)) continue;
-      if (_shadows(path, desired.keys)) {
-        shadowing.add(path);
-      } else {
-        orphans.add(path);
+      if (path.startsWith('/audio/') || _shadows(path, desired.keys)) {
+        deletions.add(path);
       }
     }
+    for (final lang in audioLanguages) {
+      if (!project.languages.contains(lang)) folders.add('/audio/$lang');
+    }
 
+    // The two generated files, only when they would change something.
     final csv = Uint8List.fromList(utf8.encode(renderTagsCsv(project)));
-    writes.add(
-      SyncWrite(cardPath: '/tags.csv', bytes: csv.length, inline: csv),
-    );
-
     final meta = Uint8List.fromList(
       utf8.encode(const JsonEncoder.withIndent('  ').convert(project.toJson())),
     );
-    writes.add(
-      SyncWrite(cardPath: '/bookie.json', bytes: meta.length, inline: meta),
-    );
+    for (final (path, bytes) in [('/tags.csv', csv), ('/bookie.json', meta)]) {
+      final current = await card.readFile(path);
+      if (current == null || !_sameBytes(current, bytes)) {
+        writes.add(
+          SyncWrite(
+            cardPath: path,
+            bytes: bytes.length,
+            inline: bytes,
+            replaces: current != null,
+          ),
+        );
+      }
+    }
 
     writes.sort((a, b) => a.cardPath.compareTo(b.cardPath));
-    shadowing.sort();
-    orphans.sort();
+    deletions.sort();
+    folders.sort();
     return SyncPlan(
       writes: writes,
-      shadowing: shadowing,
-      orphans: orphans,
+      deletions: deletions,
+      folders: folders,
+      onCard: onCard,
       missingLocally: missing,
     );
   }
 
+  static bool _sameBytes(Uint8List a, Uint8List b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
   /// Carry the plan out. Writes first, deletes last: if the card is pulled
   /// half way through, the toy is left with too many files rather than too few.
-  static Stream<SyncProgress> apply(
-    CardTarget card,
-    SyncPlan plan, {
-    bool removeOrphans = false,
-  }) async* {
-    final deletions = [...plan.shadowing, if (removeOrphans) ...plan.orphans];
+  static Stream<SyncProgress> apply(CardTarget card, SyncPlan plan) async* {
+    // Folders last, once their files are gone. A toy on older firmware cannot
+    // remove a folder and says so with `deleted: false`, which is not an error.
+    final deletions = [...plan.deletions, ...plan.folders];
     final total = plan.writes.length + deletions.length;
     var done = 0;
     var bytesDone = 0;

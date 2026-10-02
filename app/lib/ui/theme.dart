@@ -67,3 +67,28 @@ TextStyle monoStyle(BuildContext context, {double size = 13, Color? color}) =>
       letterSpacing: 0.2,
       color: color ?? Theme.of(context).colorScheme.onSurfaceVariant,
     );
+
+/// The story assistant's accent: a dusk-to-ember sweep, so anything AI-made is
+/// recognisable at a glance without shouting over the rest of the app.
+LinearGradient storyGradient(ColorScheme scheme) => const LinearGradient(
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+  colors: [Color(0xFF7B5CD6), Color(0xFFD9607A), Color(0xFFF0A04B)],
+);
+
+/// One colour per speaker in a script, stable by position in the cast — the
+/// narrator first, in the app's own ink.
+Color speakerColor(ColorScheme scheme, int index) {
+  if (index == 0) return scheme.primary;
+  const palette = [
+    Color(0xFF3F8F6B),
+    Color(0xFF7B5CD6),
+    Color(0xFFCB4F72),
+    Color(0xFF2F7FB5),
+    Color(0xFFB88A1F),
+    Color(0xFF8E5A3C),
+    Color(0xFF4A6FA5),
+    Color(0xFF9A4DB0),
+  ];
+  return palette[(index - 1) % palette.length];
+}

@@ -26,6 +26,10 @@
 	<string>Bookie Studio reads the serial number of an NFC tag so you can give that tag a story to play.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Bookie Studio records the story in your own voice, straight onto the toy's card.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Bookie Studio photographs the pages of a book so the story assistant can turn them into an audio story.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Bookie Studio uses photos of a book's pages to write and narrate an audio story for the toy.</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
