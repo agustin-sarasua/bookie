@@ -1,12 +1,18 @@
-// Three INPUT_PULLUP buttons, debounced, with long press and volume auto-repeat.
+// Four INPUT_PULLUP buttons and two TTP223 touch pads, debounced, with long
+// press and volume auto-repeat. Sampled by their own task every BTN_SCAN_MS;
+// poll() drains what it found.
 #pragma once
 
 #include <Arduino.h>
 
 namespace buttons {
 
-enum class Id : uint8_t { Lang, VolUp, VolDown, Count };
-enum class Kind : uint8_t { Press, LongPress, Repeat };
+enum class Id : uint8_t { Lang, VolUp, VolDown, Play, LampTouch, FaceTouch, Count };
+
+// Press is a tap, reported on release for everything but the volume keys.
+// Release follows a LongPress when the finger lifts, so a hold can steer
+// something for as long as it lasts (the lamp's dimmer).
+enum class Kind : uint8_t { Press, LongPress, Repeat, Release };
 
 struct Event {
   Id id;

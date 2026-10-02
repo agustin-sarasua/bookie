@@ -4,6 +4,7 @@
 #include <Wire.h>
 
 #include "config.h"
+#include "i2cbus.h"
 #include "log.h"
 
 namespace nfc {
@@ -103,7 +104,7 @@ bool presentOnI2c() {
   }
 
   wakeI2c();
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 100000);
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, I2C_BUS_HZ);
   // Default is one second per transaction, and the library polls readiness in a
   // loop — a missing reader would hold up setup() for ten seconds.
   Wire.setTimeOut(50);
@@ -138,9 +139,10 @@ struct Wiring {
   int tx;
   const char *name;
 };
+// Only one way round now the reader has pins of its own: GPIO34 cannot
+// transmit, so there is no second orientation to try.
 const Wiring kWirings[] = {
-    {PIN_I2C_SDA, PIN_I2C_SCL, "HSU, module TX on GPIO16"},
-    {PIN_I2C_SCL, PIN_I2C_SDA, "HSU, module TX on GPIO17"},
+    {PIN_NFC_RX, PIN_NFC_TX, "HSU, module TX on GPIO34"},
 };
 
 // The wiring that last answered, tried first from then on. Probing the wrong
@@ -197,7 +199,6 @@ bool awaitAck() {
 // anything at all. Going through the library would mean two one-second waits
 // per attempt, every thirty seconds, on a toy that may have no reader at all.
 bool presentOnHsu(const Wiring &wiring) {
-  Wire.end();
   Serial2.begin(PN532_HSU_BAUD, SERIAL_8N1, wiring.rx, wiring.tx);
   while (Serial2.available()) {
     Serial2.read();
@@ -247,7 +248,7 @@ bool identify(Adafruit_PN532 &device, const char *bus) {
   if (!version) {
     // The probe got an ACK out of it a moment ago, so this is the library and
     // the module disagreeing, not an absent reader. Worth saying out loud.
-    LOGE("%s answered the probe but not getFirmwareVersion()", bus);
+    LOGE("%s: no answer to getFirmwareVersion()", bus);
     return false;
   }
 
@@ -296,7 +297,6 @@ bool configureHsu(const Wiring &wiring) {
   // same module up on the same two pins, first try, every try, and it does not
   // use it. The probe costs a second when no reader is fitted, which the retry
   // backoff already exists to absorb, and it was buying a false negative.
-  Wire.end();
   Serial2.end();
   Serial2.begin(PN532_HSU_BAUD, SERIAL_8N1, wiring.rx, wiring.tx);
   while (Serial2.available()) {
@@ -309,20 +309,30 @@ bool configureHsu(const Wiring &wiring) {
   delay(PN532_HSU_WAKE_MS);
   drainHsu();  // the wake-up is sometimes echoed back
 
-  // Adafruit_PN532::begin() reopens the port on UART2's *default* pins. When
-  // those are the ones we want it is free, and it does the library's own
-  // wake-up and state reset on the way. When they are not, it would silently
-  // undo the wiring — so in that case do what this function always did and
-  // leave the port alone.
-  if (wiring.rx == PIN_I2C_SDA && wiring.tx == PIN_I2C_SCL) {
-    g_overHsu.begin();
-    drainHsu();
-  }
+  // Adafruit_PN532::begin() does the library's own wake-up and state reset.
+  // It calls Serial2.begin(115200) with no pins, which in this core only falls
+  // back to UART2's default pins (16/17, the OLED's bus) when the port is not
+  // already open — and it is, on ours, just above. Skipping it for that fear
+  // left the module never woken the way the library expects; tools/pn532-probe
+  // always calls it, and that is the one that worked.
+  g_overHsu.begin();
+  drainHsu();
 
   return identify(g_overHsu, wiring.name);
 }
 
+bool configureOnce();
+
+// The probes take the bus apart (see i2cbus.h), so the face waits them out,
+// and whatever they leave behind, the face gets its bus back.
 bool configure() {
+  i2cbus::Guard guard;
+  const bool ok = configureOnce();
+  i2cbus::ensureStarted();
+  return ok;
+}
+
+bool configureOnce() {
   g_dev = nullptr;
   g_busName = "none";
 
@@ -388,6 +398,7 @@ bool ready() { return g_ready; }
 const char *busName() { return g_busName; }
 
 void scanBus() {
+  i2cbus::Guard guard;
   LOGI("scanning I2C on SDA=GPIO%d SCL=GPIO%d", PIN_I2C_SDA, PIN_I2C_SCL);
   Serial2.end();
 
@@ -404,7 +415,7 @@ void scanBus() {
   }
 
   wakeI2c();  // otherwise a module still in LowVbat is scanned as an empty bus
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 100000);
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, I2C_BUS_HZ);
   Wire.setTimeOut(50);
   uint8_t found = 0;
   const uint32_t sweepStartedAt = millis();
@@ -432,10 +443,13 @@ void scanBus() {
     LOGE("nothing on the bus — no power, no ground, or the module does not do I2C");
     LOGE("(it answers at 0x%02X, and only with its DIP switches at 1 on, 2 off)",
          PN532_I2C_ADDRESS);
-  } else if (!g_ready) {
+  }
+#if PN532_BUS != PN532_BUS_HSU
+  else if (!g_ready) {
     LOGE("something is on the bus, but not at 0x%02X — check the DIP switches",
          PN532_I2C_ADDRESS);
   }
+#endif
 
   // Say what HSU makes of the same two wires, both ways round, because a module
   // that only speaks UART is silent above however it is wired. This is the one
@@ -542,6 +556,46 @@ Event poll(bool busy) {
   return Event::None;
 }
 
+void rawHsu() {
+  Serial2.end();
+  // A UART line idles high. Low here means the module's TX is not on this pin
+  // (or not powered); flickering means something else is.
+  pinMode(PIN_NFC_RX, INPUT);
+  int highs = 0;
+  for (int i = 0; i < 200; i++) {
+    highs += digitalRead(PIN_NFC_RX);
+    delayMicroseconds(250);
+  }
+  LOGI("GPIO%d (module TX) idle: high %d of 200 samples", PIN_NFC_RX, highs);
+
+  Serial2.begin(PN532_HSU_BAUD, SERIAL_8N1, PIN_NFC_RX, PIN_NFC_TX);
+  while (Serial2.available()) {
+    Serial2.read();
+  }
+  Serial2.write(kWakeup, sizeof(kWakeup));
+  Serial2.flush();
+  delay(PN532_HSU_WAKE_MS);
+  Serial2.write(kGetFirmwareVersion, sizeof(kGetFirmwareVersion));
+  Serial2.flush();
+  char line[3 * 32 + 1];
+  size_t n = 0, total = 0;
+  const uint32_t until = millis() + 300;
+  while ((int32_t)(millis() - until) < 0) {
+    while (Serial2.available()) {
+      const int b = Serial2.read();
+      total++;
+      if (n + 4 < sizeof(line)) {
+        n += snprintf(line + n, sizeof(line) - n, "%02X ", b);
+      }
+    }
+    delay(2);
+  }
+  line[n] = '\0';
+  LOGI("sent wake-up + GetFirmwareVersion on GPIO%d, got %u bytes back: %s", PIN_NFC_TX,
+       (unsigned)total, total ? line : "(nothing)");
+  configure();
+}
+
 const char *lastUid() { return g_lastUid; }
 
 bool readOnce(char *uidOut, size_t len, uint32_t timeoutMs) {
@@ -574,6 +628,7 @@ void powerDown() {
 }
 
 void testPins() {
+  i2cbus::Guard guard;
   Serial2.end();
   Wire.end();
   LOGI("loopback on GPIO%d and GPIO%d — join them with one jumper and nothing else",

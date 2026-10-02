@@ -30,6 +30,10 @@ void stop();
 // Call from loop(): honours the idle timeout and a `done` from the app.
 void poll();
 
+// A phone has joined the toy's network. Joined, not necessarily talking yet —
+// but it is the moment the toy can stop sounding its pairing blip.
+bool phoneConnected();
+
 // "Bookie-1A2B" — what the phone is looking for. Empty until start().
 const char *ssid();
 

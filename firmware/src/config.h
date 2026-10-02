@@ -13,6 +13,19 @@
 constexpr int PIN_I2C_SDA   = 16;  // PN532 SDA over I2C, and its TX over HSU
 constexpr int PIN_I2C_SCL   = 17;  // PN532 SCL over I2C, and its RX over HSU
 
+// The OLED face lives on these two wires. 400 kHz is what it needs to animate.
+constexpr uint32_t I2C_BUS_HZ = 400000;
+
+// The reader over HSU has two pins of its own: a UART on the OLED's pair would
+// talk over the display. GPIO34 is input-only, which is all a receive pin
+// needs. Not GPIO2 for transmit: the module's RX has a pull-up, and GPIO2 held
+// high at reset is a boot strap that stops the board being flashed.
+// In HSU mode this module transmits on the pin marked SDA and listens on SCL
+// (confirmed on the breadboard; the note further down about SCL is from an
+// earlier, crossed wiring and is wrong for this one).
+constexpr int PIN_NFC_RX = 34;  // from the module's TX: the pin marked SDA
+constexpr int PIN_NFC_TX = 13;  // to the module's RX: the pin marked SCL
+
 constexpr int PIN_SD_SCK    = 18;
 constexpr int PIN_SD_MISO   = 19;
 constexpr int PIN_SD_MOSI   = 23;
@@ -26,11 +39,26 @@ constexpr int PIN_AMP_SD    = 33;  // MAX98357A SD: high = on (left channel), lo
 constexpr int PIN_BTN_LANG   = 4;   // also the wake-from-sleep button (RTC-capable)
 constexpr int PIN_BTN_VOL_UP = 14;
 constexpr int PIN_BTN_VOL_DN = 22;  // not RTC-capable, so it cannot be the wake button
+constexpr int PIN_BTN_PLAY   = -1;  // not fitted; 15 would do (a strap, but a pulled-up input suits it)
+
+// Two TTP223 touch pads. Their outputs are push-pull and high while touched, so
+// neither needs a pull-up; a pad that is not fitted is held low by a pull-down
+// where the pin has one. GPIO39 is input-only with no pulls at all, but it is
+// RTC-capable, which is what lets the lamp pad wake the toy from deep sleep.
+constexpr int PIN_TOUCH_LAMP = 39;  // TOUCH2_OUT: the lamp
+// A second pad to tickle the face. Not on the board: GPIO13, where it used to
+// be, carries the reader now. Wire one to GPIO36 and set this to 36; -1 until
+// then, as GPIO36 has no pull-down and a bare input-only pin would tickle
+// itself all day.
+constexpr int PIN_TOUCH_FACE = -1;
+
+// WS2812B ring, fed from VBAT, data through 330R.
+constexpr int PIN_LED_DATA = 32;
 
 // Battery sense: a 100k/100k divider from the cell (after the switch) to an ADC
-// pin. Not fitted on this board, so -1: nothing reads a pin, and no warning or
-// shutdown ever hangs off a reading. Set it to 35 once the divider is there.
-constexpr int PIN_BATT_SENSE = -1;
+// pin. -1 when it is not fitted: nothing reads a pin, and no warning or
+// shutdown ever hangs off a reading.
+constexpr int PIN_BATT_SENSE = 35;
 
 // ---------------------------------------------------------------- storage
 constexpr uint32_t SD_SPI_HZ      = 16000000;  // dropped to 4 MHz automatically if the mount fails
@@ -53,6 +81,7 @@ constexpr uint32_t AUDIO_BUFFER_BYTES = 8192;  // read-ahead buffer in front of 
 constexpr int      I2S_DMA_BUFFERS    = 24;    // 24 x 128 frames (~70 ms) of slack, 12 kB of RAM
 constexpr uint32_t AMP_LINGER_MS      = 1500;  // keep the amp awake after a track, avoids pop-per-track
 constexpr uint32_t AMP_SETTLE_MS      = 20;    // let the amp bias up before the first sample
+constexpr uint32_t CHIME_ATTACK_MS    = 5;     // fade-in on every chime note (see chimes.h)
 
 // Volume curve, roughly perceptual. Step 0 is silence.
 constexpr float VOLUME_STEPS[] = {0.00f, 0.06f, 0.10f, 0.16f, 0.25f, 0.38f, 0.55f, 0.75f, 1.00f};
@@ -70,7 +99,7 @@ constexpr uint8_t VOLUME_DEFAULT_STEP = 5;
 // back to HSU, which costs 150 ms when nothing answers. Pin it to one of the
 // two once you know which board you have.
 //
-// Pinned to HSU, and not by preference: over I2C this module answers
+// Pinned to HSU, on PIN_NFC_RX/PIN_NFC_TX, and not by preference: over I2C this module answers
 // getFirmwareVersion (1.6) and then clock-stretches through SAMConfig for
 // longer than ESP32_I2C_STRETCH_CEILING_MS below, which is the most the ESP32's
 // I2C peripheral can be asked to wait. Every readiness poll then times out
@@ -103,6 +132,8 @@ constexpr uint8_t VOLUME_DEFAULT_STEP = 5;
 #define PN532_HSU_WIRING_AUTO (-1)
 #define PN532_HSU_WIRING_TX16 0
 #define PN532_HSU_WIRING_TX17 1
+// With the reader on PIN_NFC_RX/PIN_NFC_TX there is only one orientation, and
+// it is entry 0 whatever its old name says.
 #ifndef PN532_HSU_WIRING
 #define PN532_HSU_WIRING PN532_HSU_WIRING_TX16
 #endif
@@ -176,11 +207,45 @@ constexpr uint32_t LINK_IDLE_MS       = 5UL * 60UL * 1000UL;  // no request for 
 constexpr size_t   LINK_PATH_MAX      = 128;   // longer than AUDIO_PATH_MAX, the app writes /system too
 constexpr size_t   LINK_CHUNK_BYTES   = 4096;  // one SD read/write per HTTP chunk
 constexpr char     CLIP_LINK[]        = "link";  // optional "ready to connect" prompt
+constexpr uint32_t LINK_PULSE_MS      = 4000;  // pairing blip while no phone has joined
+constexpr uint32_t LINK_CHECK_MS      = 250;   // how often to ask the AP whether one has
 
 // ---------------------------------------------------------------- buttons
+constexpr uint32_t BTN_SCAN_MS       = 5;     // how often the button task samples the pins
 constexpr uint32_t BTN_DEBOUNCE_MS   = 25;
 constexpr uint32_t BTN_LONG_MS       = 800;
 constexpr uint32_t BTN_REPEAT_MS     = 300;   // volume auto-repeat while held
+constexpr uint32_t TOUCH_HOLD_MS     = 450;   // touch pad held this long: the dimmer takes over
+constexpr uint32_t TOUCH_DOUBLE_MS   = 350;   // second tap inside this: next lamp colour
+
+// ---------------------------------------------------------------- light
+// The ring runs off the cell, and sixteen WS2812Bs flat out are an amp. The
+// cap is applied after everything else, so no effect can exceed it.
+constexpr uint8_t  LED_RING_COUNT      = 12;
+constexpr uint8_t  LED_RING_OFFSET     = 0;     // which LED is "top", for the arcs
+constexpr bool     LED_RING_CLOCKWISE  = true;
+constexpr uint8_t  LED_MAX_BRIGHTNESS  = 170;   // of 255
+constexpr uint32_t LIGHT_FRAME_MS      = 16;    // ~60 fps
+constexpr float    LAMP_DEFAULT_LEVEL  = 0.6f;
+constexpr float    LAMP_MIN_LEVEL      = 0.04f; // the dimmer never goes fully dark
+constexpr uint32_t LAMP_DIM_SWEEP_MS   = 2500;  // dimmer, darkest to brightest
+constexpr uint32_t LAMP_FADE_MS        = 450;
+constexpr uint32_t LAMP_AUTO_OFF_MS    = 60UL * 60UL * 1000UL;  // a night light that forgets; 0 = never
+constexpr float    STORY_GLOW_LEVEL    = 0.35f; // how bright a story glows with the lamp off
+
+// ---------------------------------------------------------------- face
+// SSD1306 or SH1106, 128x64. The SH1106 is the 1.3" one; it has 132 columns
+// and shows the middle 128, which is all the difference there is here.
+#define OLED_SSD1306 0
+#define OLED_SH1106  1
+#ifndef OLED_CONTROLLER
+#define OLED_CONTROLLER OLED_SSD1306
+#endif
+constexpr uint8_t  OLED_ADDRESS     = 0x3C;
+constexpr bool     OLED_FLIP        = false;  // rotate 180 if the panel went in upside down
+constexpr uint32_t FACE_FRAME_MS    = 33;     // ~30 fps; only changed rows go on the wire
+constexpr uint32_t FACE_DOZE_MS     = 90UL * 1000UL;       // idle this long: eyes get heavy
+constexpr uint32_t FACE_OFF_MS      = 6UL * 60UL * 1000UL; // ...and then the panel rests (burn-in)
 
 // ---------------------------------------------------------------- power
 constexpr float    BATT_DIVIDER      = 2.0f;   // 100k/100k on the D32

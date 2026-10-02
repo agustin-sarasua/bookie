@@ -44,4 +44,23 @@ void setVolumeStep(uint8_t step) {
   g_prefs.putUChar("vol", step);
 }
 
+void lamp(uint8_t &scene, float &level) {
+  // isKey first: a missing float is logged as an error by Preferences.
+  scene = g_prefs.isKey("lampScene") ? g_prefs.getUChar("lampScene", 0) : 0;
+  level = g_prefs.isKey("lampLevel") ? g_prefs.getFloat("lampLevel", LAMP_DEFAULT_LEVEL)
+                                     : LAMP_DEFAULT_LEVEL;
+}
+
+void setLamp(uint8_t scene, float level) {
+  uint8_t was;
+  float wasLevel;
+  lamp(was, wasLevel);
+  if (!g_prefs.isKey("lampScene") || was != scene) {
+    g_prefs.putUChar("lampScene", scene);
+  }
+  if (!g_prefs.isKey("lampLevel") || fabsf(wasLevel - level) > 0.005f) {
+    g_prefs.putFloat("lampLevel", level);
+  }
+}
+
 }  // namespace settings

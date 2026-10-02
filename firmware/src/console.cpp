@@ -6,7 +6,9 @@
 #include "audio.h"
 #include "battery.h"
 #include "config.h"
+#include "face.h"
 #include "library.h"
+#include "light.h"
 #include "log.h"
 #include "nfc.h"
 #include "sdfs.h"
@@ -28,13 +30,17 @@ void help() {
   LOGI("  lang [code]       read or set the language");
   LOGI("  uid               wait 5 s for a tag and report what it maps to");
   LOGI("  i2c               scan the I2C bus, then probe HSU both ways round");
+  LOGI("  hsu               raw bytes from the reader over HSU, and its line level");
   LOGI("  pins              loopback test on the reader's two pins (jumper them first)");
   LOGI("  tags              reload %s", FILE_TAGS);
   LOGI("  rescan            mount the card if needed, re-read %s and the folders under %s", FILE_TAGS,
        DIR_AUDIO);
-  LOGI("  btn               watch the three button pins for 8 s");
+  LOGI("  btn               watch the button and touch pins for 8 s");
   LOGI("  bat               battery voltage");
   LOGI("  link [off]        WiFi for the phone to write the card, or hold language + vol+");
+  LOGI("  lamp [on|off|next|dim|stop]  the lamp, as the touch pad would");
+  LOGI("  meter             the speaker level the face and ring follow, for 3 s");
+  LOGI("  fx <name>         ring + face: tag unknown happy giggle sleepy lowbat");
   LOGI("  sleep             deep sleep now");
 }
 
@@ -43,13 +49,16 @@ void help() {
 // buttons::poll() — they are all just a pin that stayed high.
 void watchButtons() {
   struct Pin {
-    uint8_t pin;
+    int8_t pin;
     const char *name;
   };
   const Pin kPins[] = {
       {PIN_BTN_LANG, "language"},
       {PIN_BTN_VOL_UP, "vol+"},
       {PIN_BTN_VOL_DN, "vol-"},
+      {PIN_BTN_PLAY, "play"},
+      {PIN_TOUCH_LAMP, "lamp pad"},  // the pads read HIGH while touched
+      {PIN_TOUCH_FACE, "face pad"},
   };
   constexpr size_t kCount = sizeof(kPins) / sizeof(kPins[0]);
 
@@ -57,6 +66,9 @@ void watchButtons() {
   uint16_t edges[kCount] = {0};
   LOGI("resting levels (pulled up, so HIGH until pressed):");
   for (size_t i = 0; i < kCount; i++) {
+    if (kPins[i].pin < 0) {
+      continue;  // not fitted
+    }
     last[i] = digitalRead(kPins[i].pin);
     LOGI("  %-8s GPIO%-2u %s", kPins[i].name, kPins[i].pin,
          last[i] ? "HIGH" : "LOW  <- held down, or shorted to GND");
@@ -66,6 +78,9 @@ void watchButtons() {
   const uint32_t deadline = millis() + 8000;
   while ((int32_t)(millis() - deadline) < 0) {
     for (size_t i = 0; i < kCount; i++) {
+      if (kPins[i].pin < 0) {
+        continue;
+      }
       const bool level = digitalRead(kPins[i].pin);
       if (level == last[i]) {
         continue;
@@ -81,6 +96,9 @@ void watchButtons() {
   // edges where buttons::poll() would only ever have reported one press, or
   // none at all. That is what a loose wire looks like.
   for (size_t i = 0; i < kCount; i++) {
+    if (kPins[i].pin < 0) {
+      continue;
+    }
     if (edges[i] == 0) {
       LOGE("  %-8s GPIO%-2u never moved", kPins[i].name, kPins[i].pin);
     } else if (edges[i] > 6) {
@@ -150,6 +168,8 @@ void execute(char *line) {
     }
   } else if (!strcmp(cmd, "i2c")) {
     nfc::scanBus();
+  } else if (!strcmp(cmd, "hsu")) {
+    nfc::rawHsu();
   } else if (!strcmp(cmd, "pins")) {
     nfc::testPins();
   } else if (!strcmp(cmd, "tags")) {
@@ -178,6 +198,54 @@ void execute(char *line) {
       LOGI("link already up on '%s'", toylink::ssid());
     } else {
       app::toggleLink();
+    }
+  } else if (!strcmp(cmd, "meter")) {
+    // What the face and the ring are dancing to, as a bar per 100 ms.
+    for (int i = 0; i < 30; i++) {
+      const float v = audio::level();
+      char bar[41];
+      const int n = (int)(v * 40.0f);
+      memset(bar, '#', n);
+      bar[n] = '\0';
+      LOGI("%.3f %s", v, bar);
+      delay(100);
+    }
+  } else if (!strcmp(cmd, "lamp")) {
+    if (!arg || !*arg) {
+      light::lampToggle();
+    } else if (!strcmp(arg, "on")) {
+      light::lampOn();
+    } else if (!strcmp(arg, "off")) {
+      if (light::lampIsOn()) {
+        light::lampToggle();
+      }
+    } else if (!strcmp(arg, "next")) {
+      light::lampNextScene();
+    } else if (!strcmp(arg, "dim")) {
+      light::dimStart();
+    } else if (!strcmp(arg, "stop")) {
+      light::dimStop();
+    }
+  } else if (!strcmp(cmd, "fx")) {
+    const char *name = arg ? arg : "";
+    if (!strcmp(name, "tag")) {
+      light::tag(light::hueFor("demo"));
+      face::react(face::Mood::Surprised, 650);
+    } else if (!strcmp(name, "unknown")) {
+      light::tagUnknown();
+      face::react(face::Mood::Confused, 1600);
+    } else if (!strcmp(name, "happy")) {
+      face::react(face::Mood::Happy, 1500);
+    } else if (!strcmp(name, "giggle")) {
+      face::react(face::Mood::Giggle, 1400);
+      light::tickle();
+    } else if (!strcmp(name, "sleepy")) {
+      face::react(face::Mood::Sleepy, 2500);
+    } else if (!strcmp(name, "lowbat")) {
+      light::lowBattery();
+      face::react(face::Mood::Sleepy, 3000);
+    } else {
+      LOGE("fx: tag unknown happy giggle sleepy lowbat");
     }
   } else if (!strcmp(cmd, "sleep")) {
     app::sleepNow("console");

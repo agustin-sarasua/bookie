@@ -32,4 +32,8 @@ void scanBus();
 // jumper between them: the one test that tells the board apart from the module.
 void testPins();
 
+// HSU at the byte level: the receive line's idle level, and every byte the
+// module sends back to a wake-up and a firmware-version request.
+void rawHsu();
+
 }  // namespace nfc

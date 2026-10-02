@@ -1,10 +1,24 @@
-// Bookie — tap an NFC tag on a page, hear that page read aloud.
+// Bookie — tap an NFC tag on a page, hear that page read aloud. And a lamp,
+// with a face.
+//
+//   lamp pad        : tap switches the lamp on and off, a double tap changes its
+//                     colour, holding it dims (the next hold goes the other way);
+//                     wakes the toy from deep sleep with the lamp on
+//   face pad        : tickles the face (optional, TOUCH1)
+//   play button     : pause / resume, or replay the last tag; long press stops
 //
 //   language button : tap cycles through the folders in /audio, announced out loud;
 //                     long press pauses / resumes, or replays the last tag when idle;
 //                     wakes the toy from deep sleep
 //   volume buttons  : eight steps, remembered across power cycles
 //   language + vol+ : link mode (hold language, then press volume up)
+//
+// Every button answers on the face (face.h) and the ring (light.h) as well as
+// out loud with a chime (chimes.h): a
+// flutter for a new language, a rising or falling blip for volume — higher
+// the louder — and a low bonk when there is nowhere further to go. Link mode
+// plays a rising arpeggio when it comes up, blips softly every few seconds
+// until a phone joins, and plays the arpeggio backwards when it goes down.
 //
 // The decoder runs in its own task (see audio.cpp), so everything in loop() is
 // free to block for a few milliseconds without the speaker noticing.
@@ -18,9 +32,12 @@
 #include "audio.h"
 #include "battery.h"
 #include "buttons.h"
+#include "chimes.h"
 #include "config.h"
 #include "console.h"
+#include "face.h"
 #include "library.h"
+#include "light.h"
 #include "log.h"
 #include "nfc.h"
 #include "sdfs.h"
@@ -36,6 +53,13 @@ uint32_t g_completions = 0;
 uint32_t g_lastActivityAt = 0;
 uint32_t g_nextBatteryAt = 0;
 bool g_batteryWarned = false;
+bool g_linkWasActive = false;
+bool g_phoneWasHere = false;
+uint32_t g_nextLinkCheckAt = 0;
+uint32_t g_nextPulseAt = 0;
+uint32_t g_lastLampTapAt = 0;
+
+using chimes::Chime;
 
 bool playClip(const char *clip) {
   const String path = library::systemClip(g_language, clip);
@@ -53,9 +77,15 @@ void onTagArrived(const String &uid) {
   if (path.isEmpty()) {
     LOGE("tag %s has no clip in %s", uid.c_str(), g_language.c_str());
     g_pendingTrack = "";
+    light::tagUnknown();
+    face::react(face::Mood::Confused, 1600);
     playClip(CLIP_UNKNOWN);
     return;
   }
+  // Each tag has a colour of its own, which the ring keeps for as long as its
+  // story plays.
+  light::tag(light::hueFor(uid.c_str()));
+  face::react(face::Mood::Surprised, 650);
   g_currentTag = uid;
   g_pendingTrack = "";
   audio::play(path.c_str());
@@ -63,6 +93,7 @@ void onTagArrived(const String &uid) {
 
 void onTrackFinished() {
   if (g_pendingTrack.isEmpty()) {
+    face::react(face::Mood::Happy, 1300);  // the end
     return;
   }
   const String next = g_pendingTrack;
@@ -72,8 +103,39 @@ void onTrackFinished() {
 
 void onButton(const buttons::Event &ev) {
   app::markActivity();
-  static const char *const kKinds[] = {"press", "long press", "repeat"};
+  static const char *const kKinds[] = {"press", "long press", "repeat", "release"};
   LOGI("button %s: %s", buttons::name(ev.id), kKinds[(int)ev.kind]);
+
+  // The lamp is a lamp whatever else is going on, link mode included.
+  if (ev.id == buttons::Id::LampTouch) {
+    if (ev.kind == buttons::Kind::Press) {
+      const uint32_t now = millis();
+      if (g_lastLampTapAt && now - g_lastLampTapAt < TOUCH_DOUBLE_MS) {
+        // The first tap of the pair already toggled; this one undoes that
+        // and moves on a colour, so the light dips and comes back changed.
+        g_lastLampTapAt = 0;
+        light::lampNextScene();
+      } else {
+        g_lastLampTapAt = now;
+        light::lampToggle();
+      }
+    } else if (ev.kind == buttons::Kind::LongPress) {
+      light::dimStart();
+    } else if (ev.kind == buttons::Kind::Release) {
+      light::dimStop();
+    }
+    return;
+  }
+  if (ev.id == buttons::Id::FaceTouch) {
+    if (ev.kind == buttons::Kind::Press || ev.kind == buttons::Kind::LongPress) {
+      face::react(face::Mood::Giggle, 1400);
+      light::tickle();
+    }
+    return;
+  }
+  if (ev.kind == buttons::Kind::Release) {
+    return;  // only the lamp's dimmer cares when a hold ends
+  }
 
   // While the phone is connected the toy is a card reader, and every button is
   // the way out of that. Anything else would need a second gesture to undo.
@@ -118,6 +180,24 @@ void onButton(const buttons::Event &ev) {
       }
       break;
 
+    case buttons::Id::Play:
+      if (ev.kind == buttons::Kind::Press) {
+        if (audio::busy()) {
+          audio::togglePause();
+          LOGI("%s", audio::state() == audio::State::Paused ? "paused" : "resumed");
+        } else if (!g_currentTag.isEmpty()) {
+          onTagArrived(g_currentTag);
+        } else {
+          audio::chime(Chime::Limit);
+          light::limit();
+        }
+      } else if (ev.kind == buttons::Kind::LongPress) {
+        g_pendingTrack = "";
+        audio::stop();
+        LOGI("stopped");
+      }
+      break;
+
     case buttons::Id::VolUp:
       if (ev.kind != buttons::Kind::LongPress) {
         app::setVolume(audio::volumeStep() + 1);
@@ -159,6 +239,8 @@ void checkBattery() {
   if (v < BATT_WARN_V && !g_batteryWarned) {
     g_batteryWarned = true;
     LOGI("battery low: %.2f V", v);
+    light::lowBattery();
+    face::react(face::Mood::Sleepy, 3000);
     if (!audio::busy()) {
       playClip(CLIP_LOWBATT);
     }
@@ -167,10 +249,56 @@ void checkBattery() {
   }
 }
 
+// Link mode's sounds, all driven from here so they follow the mode however it
+// was entered or left — the button combo, the console, the app saying it is
+// done, or the idle timeout.
+void checkLink() {
+  const uint32_t now = millis();
+  const bool active = toylink::active();
+  if (active != g_linkWasActive) {
+    g_linkWasActive = active;
+    g_phoneWasHere = false;
+    g_nextPulseAt = now + LINK_PULSE_MS;
+    light::link(active ? light::Link::Waiting : light::Link::Off);
+    face::link(active, false, toylink::ssid());
+    if (active) {
+      audio::chime(Chime::Pairing);
+      // Said out loud where there is a clip for it — "did it work?" is
+      // otherwise a question only the serial monitor can answer.
+      playClip(CLIP_LINK);
+    } else {
+      audio::chime(Chime::Unpaired);
+    }
+    return;
+  }
+  if (!active || (int32_t)(now - g_nextLinkCheckAt) < 0) {
+    return;
+  }
+  g_nextLinkCheckAt = now + LINK_CHECK_MS;
+
+  const bool phone = toylink::phoneConnected();
+  if (phone != g_phoneWasHere) {
+    g_phoneWasHere = phone;
+    LOGI("link: phone %s", phone ? "joined" : "left");
+    light::link(phone ? light::Link::Phone : light::Link::Waiting);
+    face::link(true, phone, toylink::ssid());
+    if (phone) {
+      audio::chime(Chime::Paired);
+    }
+    g_nextPulseAt = now + LINK_PULSE_MS;  // a phone that leaves gets a moment before the blip
+  }
+  if (!phone && !audio::busy() && (int32_t)(now - g_nextPulseAt) >= 0) {
+    g_nextPulseAt = now + LINK_PULSE_MS;
+    audio::chime(Chime::PairingPulse);
+  }
+}
+
 void checkIdleSleep() {
   // A paused clip counts as idle; otherwise a toy left mid-story never sleeps.
-  // Link mode does not: it has its own, shorter, timeout.
-  if (IDLE_SLEEP_MS == 0 || audio::state() == audio::State::Playing || toylink::active()) {
+  // Link mode does not: it has its own, shorter, timeout. Nor does a lamp
+  // that is on: it is a lamp, and it has a timeout of its own as well.
+  if (IDLE_SLEEP_MS == 0 || audio::state() == audio::State::Playing || toylink::active() ||
+      light::lampIsOn()) {
     return;
   }
   if (millis() - g_lastActivityAt > IDLE_SLEEP_MS) {
@@ -184,7 +312,10 @@ namespace app {
 
 const String &language() { return g_language; }
 
-void markActivity() { g_lastActivityAt = millis(); }
+void markActivity() {
+  g_lastActivityAt = millis();
+  face::poke();
+}
 
 void setLanguage(const String &code) {
   if (!library::hasLanguage(code)) {
@@ -197,6 +328,8 @@ void setLanguage(const String &code) {
     // dead button, which is the one thing it is not.
     LOGD("language already %s — only %u on the card", code.c_str(),
          (unsigned)library::languages().size());
+    audio::chime(Chime::Limit);
+    light::limit();
     return;
   }
 
@@ -212,6 +345,11 @@ void setLanguage(const String &code) {
     g_pendingTrack = library::trackFor(g_currentTag, code);
   }
 
+  String shown = code;
+  shown.toUpperCase();
+  face::say(shown.c_str());
+  light::language(code);
+  audio::chime(Chime::Language);
   if (playClip(CLIP_LANGUAGE)) {
     return;
   }
@@ -230,13 +368,24 @@ void setVolume(uint8_t step) {
   if (step > VOLUME_MAX_STEP) {
     step = VOLUME_MAX_STEP;
   }
-  if (step == audio::volumeStep()) {
+  const uint8_t was = audio::volumeStep();
+  if (step == was) {
     LOGD("volume already %u/%u", step, VOLUME_MAX_STEP);  // at an end stop
+    // Heard at the top; at the bottom the volume is zero and so is the bonk,
+    // which is its own answer. Seen at both.
+    audio::chime(Chime::Limit);
+    light::volume(step, VOLUME_MAX_STEP);
+    face::volume(step, VOLUME_MAX_STEP);
     return;
   }
   audio::setVolumeStep(step);
   settings::setVolumeStep(step);
   LOGI("volume %u/%u", step, VOLUME_MAX_STEP);
+  light::volume(step, VOLUME_MAX_STEP);
+  face::volume(step, VOLUME_MAX_STEP);
+  // After the gain, so the chime is at the new volume; two semitones a step,
+  // so the pitch says roughly where in the range it is as well.
+  audio::chime(step > was ? Chime::VolumeUp : Chime::VolumeDown, (int8_t)(2 * (step - 1)));
 }
 
 void playTag(const String &uid) { onTagArrived(uid); }
@@ -246,11 +395,13 @@ void toggleLink() {
     toylink::stop();
     return;
   }
-  // Said out loud where there is a clip for it — the toy has no screen, and
-  // "did it work?" is otherwise a question only the serial monitor can answer.
-  playClip(CLIP_LINK);
+  // What it sounds like when it does come up is checkLink()'s job. Playing the
+  // clip here, before start(), would only have it cut off by the audio::stop()
+  // that start() does to make room for the radio.
   if (!toylink::start()) {
     LOGE("link: not started");
+    audio::chime(Chime::Limit);
+    light::limit();
   }
 }
 
@@ -267,6 +418,7 @@ void printStatus() {
        (unsigned)library::tagCount());
   LOGI("reader    : %s (%s)", nfc::ready() ? "ready" : "MISSING", nfc::busName());
   LOGI("link      : %s", toylink::active() ? toylink::ssid() : "off");
+  LOGI("lamp      : %s", light::lampIsOn() ? "on" : "off");
   if (battery::wired()) {
     LOGI("battery   : %.2f V (%u%%)", battery::volts(), battery::percent());
   } else {
@@ -276,9 +428,11 @@ void printStatus() {
 }
 
 void sleepNow(const char *reason) {
-  LOGI("sleeping (%s) — press the language button to wake", reason);
+  LOGI("sleeping (%s) — press the language button or touch the lamp to wake", reason);
   toylink::stop();
   audio::stop();
+  face::sleep();  // eyes shut, panel off
+  light::sleep();  // ring faded out, data line held low
   delay(80);
   audio::shutdownAmp();
   nfc::powerDown();
@@ -292,6 +446,9 @@ void sleepNow(const char *reason) {
   rtc_gpio_pullup_en((gpio_num_t)PIN_BTN_LANG);
   rtc_gpio_pulldown_dis((gpio_num_t)PIN_BTN_LANG);
   esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BTN_LANG, 0);
+  // The lamp pad too: a TTP223 drives its line high while touched, and stays
+  // powered from the 3.3 V rail through the sleep.
+  esp_sleep_enable_ext1_wakeup(1ULL << PIN_TOUCH_LAMP, ESP_EXT1_WAKEUP_ANY_HIGH);
   esp_deep_sleep_start();
 }
 
@@ -308,11 +465,21 @@ void setup() {
   gpio_hold_dis((gpio_num_t)PIN_AMP_SD);
   // The ext0 wake leaves the button pad routed to the RTC domain; hand it back
   // to the digital GPIO matrix or digitalRead() never sees it change.
-  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
+  const esp_sleep_wakeup_cause_t woke = esp_sleep_get_wakeup_cause();
+  if (woke == ESP_SLEEP_WAKEUP_EXT0) {
     rtc_gpio_deinit((gpio_num_t)PIN_BTN_LANG);
+  }
+  const bool wokeByLamp = woke == ESP_SLEEP_WAKEUP_EXT1;
+  if (wokeByLamp) {
+    rtc_gpio_deinit((gpio_num_t)PIN_TOUCH_LAMP);
   }
 
   settings::begin();
+  // The face and the ring first: they are the toy waking up, and everything
+  // after this is the toy finding its feet behind them. Woken by the lamp pad,
+  // the lamp is what it was asked for.
+  face::begin();
+  light::begin(wokeByLamp);
   buttons::begin();
   battery::begin();
 
@@ -374,6 +541,7 @@ void loop() {
     onTrackFinished();
   }
 
+  checkLink();  // after toylink::poll() and the buttons, either may have taken it down
   console::poll();
   checkBattery();
   checkIdleSleep();

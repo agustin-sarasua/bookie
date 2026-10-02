@@ -6,6 +6,8 @@
 
 #include <Arduino.h>
 
+#include "chimes.h"
+
 namespace audio {
 
 enum class State : uint8_t { Idle, Playing, Paused };
@@ -26,10 +28,22 @@ bool busy();  // playing or paused
 // caller can chain clips without polling for a specific file name.
 uint32_t completions();
 
+// Plays one of the synthesised tones in chimes.h, at the current volume. It
+// slots in between whatever else is queued: a story that is playing stops for
+// the length of the chime and carries on, and a paused one stays paused.
+// `transpose` shifts it by that many semitones. Chimes do not count as
+// completions, and do not make busy() true.
+void chime(chimes::Chime which, int8_t transpose = 0);
+
 void setVolumeStep(uint8_t step);
 uint8_t volumeStep();
 
 const char *currentPath();
+
+// How loud the speaker is right now, 0..1, before the volume gain — so the
+// face talks at any volume. Delayed to match what is actually being heard.
+// Chimes count: the face sings along.
+float level();
 
 // Silences the amplifier immediately; used before deep sleep.
 void shutdownAmp();

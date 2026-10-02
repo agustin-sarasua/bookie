@@ -311,8 +311,18 @@ esp_err_t handleDelete(httpd_req_t *req) {
     return ESP_OK;
   }
 
+  // A file, or an empty folder: the app clears a removed language's clips and
+  // then its folder, because every folder under /audio is a language the
+  // button would otherwise keep cycling through. rmdir refuses a folder that
+  // still has anything in it, so nothing more than that can go this way.
   sdfs::Guard guard;
-  const bool gone = SD.exists(path) && SD.remove(path);
+  bool gone = false;
+  if (SD.exists(path)) {
+    File probe = SD.open(path);
+    const bool isDir = probe && probe.isDirectory();
+    probe.close();
+    gone = isDir ? SD.rmdir(path) : SD.remove(path);
+  }
   if (gone) {
     LOGI("link: removed %s", path);
   }
@@ -346,6 +356,8 @@ const httpd_uri_t kRoutes[] = {
 bool active() { return g_active; }
 
 const char *ssid() { return g_ssid; }
+
+bool phoneConnected() { return g_active && WiFi.softAPgetStationNum() > 0; }
 
 bool start() {
   if (g_active) {
